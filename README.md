@@ -28,7 +28,7 @@ invoice-matcher/
 │   ├── test_normalizer.py
 │   ├── test_indexer.py
 │   ├── test_matcher.py
-│   └── test_integration.py # requires 20250901.json at project root
+│   └── test_integration.py
 ├── runner.py           # entry point — loads JSON, runs match, saves output
 └── 20250901.json       # input data (place here before running)
 ```
@@ -73,8 +73,6 @@ python3 -m pytest tests/ -v
 # Unit tests only (no data file needed)
 python3 -m pytest tests/ -v --ignore=tests/test_integration.py
 ```
-
-Integration tests auto-skip if `20250901.json` is not present.
 
 ## Results (20250901.json)
 
