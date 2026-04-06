@@ -3,8 +3,10 @@
 ## Context
 
 - **Dataset:** 32 deliveries, 3,319 invoices
-- **Match rate after plate filter:** 134/3,319 (4%) — remaining belong to deliveries outside this dataset
+- **Match rate after plate filter:** 127/3,319 (4%) — remaining belong to deliveries outside this dataset
 - **Ambiguous after date filter:** 102/127 relevant invoices (80%)
+- **Auto-matched (scoring):** 104 invoices
+- **Pending LLM resolution:** ~23 invoices
 - **Goal:** Maximize correct matches while minimizing false assignments
 
 ---
@@ -20,9 +22,9 @@ Step 1: Candidate Generation        → 127 relevant invoices (plate + date filt
     ▼
 Step 2: Candidate Scoring           → score per (invoice, delivery) pair
     │
-    ├─ gap ≥ 0.2 ──────────────────→ AUTO MATCH
+    ├─ gap ≥ 0.05 ──────────────────→ AUTO MATCH
     │
-    ├─ gap < 0.2 ──────────────────→ Step 3: LLM Resolution (~44 cases)
+    ├─ gap < 0.05 ──────────────────→ Step 3: LLM Resolution (~23 cases)
     │                                    │
     │                               ├─ confident ──→ AUTO MATCH
     │                               └─ uncertain ──→ MANUAL REVIEW
@@ -114,12 +116,12 @@ All weights are configurable — not hardcoded into business logic.
 
 ---
 
-## Step 3: LLM Resolution (~44 cases)
+## Step 3: LLM Resolution (~23 cases)
 
 For invoices where score gap < `CONFIDENCE_THRESHOLD`, use LLM to resolve.
 
 **Why LLM here (not earlier):**
-Token overlap fails when addresses use abbreviations, different formats, or reference intermediate warehouses. LLM understands semantic similarity (e.g. "Quảng trường Lâm Viên" = "GO! Đà Lạt"). Calling LLM on only ~44 cases keeps token budget minimal — appropriate scope for the problem size.
+Token overlap fails when addresses use abbreviations, different formats, or reference intermediate warehouses. LLM understands semantic similarity (e.g. "Quảng trường Lâm Viên" = "GO! Đà Lạt"). Calling LLM on only ~23 cases keeps token budget minimal — appropriate scope for the problem size.
 
 **Prompt:**
 ```
@@ -177,7 +179,7 @@ all candidates below MIN_REVIEW_THRESHOLD
 
 **Parameters:**
 - `AUTO_MATCH_THRESHOLD = 0.70` (calibrate from labeled data)
-- `MARGIN_THRESHOLD = 0.20` (from EDA gap analysis: 47/91 cases have gap > 0.2)
+- `MARGIN_THRESHOLD = 0.05` (from EDA gap analysis: 47/91 cases have gap > 0.05)
 - `MIN_REVIEW_THRESHOLD = 0.30`
 
 ---
@@ -198,10 +200,8 @@ Each invoice produces a structured result:
       "delivery_id": 66975,
       "score": 0.91,
       "reasons": {
-        "date_score": 0.85,
         "address_score": 0.95,
-        "weight_score": 0.70,
-        "province_score": 1.00
+        "weight_score": 0.70
       }
     },
     {
@@ -253,7 +253,7 @@ Since only 127 invoices survive primary filtering, manual review volume is manag
 | `DATE_WINDOW` | 1 day | Date filter window around pickup/dropoff |
 | `W_ADDR` | 0.7 | Address score weight |
 | `W_WEIGHT` | 0.3 | Weight score weight |
-| `CONFIDENCE_THRESHOLD` | 0.2 | Min gap to auto-match |
+| `CONFIDENCE_THRESHOLD` | 0.05 | Min gap to auto-match |
 | `LLM_MODEL` | claude-haiku-4-5 | Model for semantic address matching |
 
 ---
@@ -264,7 +264,7 @@ Since only 127 invoices survive primary filtering, manual review volume is manag
 |---|---|---|---|
 | LLM for all 3,319 invoices | Very high | High | Slow |
 | LLM for all 127 candidates | High | High | Medium |
-| LLM only for ~44 unclear cases | **Minimal** | **High** | **Fast** |
+| LLM only for ~23 unclear cases | **Minimal** | **High** | **Fast** |
 
 ---
 
