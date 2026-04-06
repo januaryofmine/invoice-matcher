@@ -16,6 +16,9 @@ manual_review.csv
 
 # Data files (may contain sensitive info)
 *.json
+!invoice-ui/package.json
+!invoice-ui/package-lock.json
+!invoice-ui/vite.config.js
 
 # OS
 .DS_Store
@@ -24,3 +27,6 @@ manual_review.csv
 invoice-ui/node_modules/
 invoice-ui/public/output.json
 invoice-ui/dist/
+!invoice-ui/package.json
+!invoice-ui/package-lock.json
+!invoice-ui/vite.config.js
