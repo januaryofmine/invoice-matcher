@@ -17,7 +17,7 @@ Every invoice goes through up to 4 steps:
 
 **Step 2: Date window `[pickup_date - 1, dropoff_date + 1]`**
 - 1 candidate passes → assign ✓
-- >1 candidates pass → step 3a
+- More than 1 candidates pass → step 3a
 - 0 candidates pass → `manual_review (date_out_of_window)`
 
 **Step 3a: LLM province check**
@@ -25,14 +25,14 @@ Every invoice goes through up to 4 steps:
 - Filter candidates to same province as invoice
 - Candidates with no province data are kept (not dropped) to avoid false negatives
 - 1 candidate remaining → assign ✓
-- >1 candidates remaining → step 3b
+- More than 1 candidates remaining → step 3b
 - 0 candidates remaining → `manual_review (province_mismatch)`
 
 **Step 3b: Token overlap address match**
 - Tokenize invoice `(Delivery address)` and delivery `dropoff_location` with Vietnamese stopword filtering
 - Pick candidate(s) with highest token overlap score
 - 1 candidate remaining → assign ✓
-- >1 candidates remaining → step 4
+- More than 1 candidates remaining → step 4
 - 0 overlap → fallback to step 4
 
 **Step 4: Weight tiebreak**
