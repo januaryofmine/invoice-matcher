@@ -1,6 +1,6 @@
 # invoice-matcher
 
-Match VAT invoices to delivery records using deterministic logic — no LLM required.
+Match VAT invoices to delivery records using deterministic logic.
 
 ## Problem
 
@@ -42,7 +42,7 @@ git clone <repo>
 cd invoice-matcher
 
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 pip install pytest
 ```
