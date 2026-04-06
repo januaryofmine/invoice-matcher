@@ -19,3 +19,8 @@ manual_review.csv
 
 # OS
 .DS_Store
+
+# invoice-ui
+invoice-ui/node_modules/
+invoice-ui/public/output.json
+invoice-ui/dist/
