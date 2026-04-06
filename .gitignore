@@ -30,3 +30,4 @@ invoice-ui/dist/
 !invoice-ui/package.json
 !invoice-ui/package-lock.json
 !invoice-ui/vite.config.js
+!invoice-ui/vercel.json
