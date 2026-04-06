@@ -1,6 +1,6 @@
 # invoice-matcher
 
-Match VAT invoices to delivery records using a unified pipeline — with LLM-assisted province extraction for ambiguous cases.
+Match VAT invoices to delivery records using a unified pipeline, with LLM-assisted province extraction for ambiguous cases.
 
 ## Problem
 
@@ -17,7 +17,7 @@ Every invoice goes through up to 4 steps:
 
 **Step 2: Date window `[pickup_date - 1, dropoff_date + 1]`**
 - 1 candidate passes → assign ✓
-- \>1 candidates pass → step 3a
+- >1 candidates pass → step 3a
 - 0 candidates pass → `manual_review (date_out_of_window)`
 
 **Step 3a: LLM province check**
@@ -25,14 +25,14 @@ Every invoice goes through up to 4 steps:
 - Filter candidates to same province as invoice
 - Candidates with no province data are kept (not dropped) to avoid false negatives
 - 1 candidate remaining → assign ✓
-- \>1 candidates remaining → step 3b
+- >1 candidates remaining → step 3b
 - 0 candidates remaining → `manual_review (province_mismatch)`
 
 **Step 3b: Token overlap address match**
 - Tokenize invoice `(Delivery address)` and delivery `dropoff_location` with Vietnamese stopword filtering
 - Pick candidate(s) with highest token overlap score
 - 1 candidate remaining → assign ✓
-- \>1 candidates remaining → step 4
+- >1 candidates remaining → step 4
 - 0 overlap → fallback to step 4
 
 **Step 4: Weight tiebreak**
@@ -63,7 +63,7 @@ invoice-matcher/
 │   ├── test_normalizer.py
 │   ├── test_indexer.py
 │   ├── test_matcher.py        # unit tests with mocked province extractor
-│   └── test_integration.py   # requires 20250901.json + ANTHROPIC_API_KEY
+│   └── test_integration.py
 ├── runner.py                  # entry point — loads JSON, runs match, saves output
 ├── debug_province.py          # debug script for province extraction tracing
 └── 20250901.json              # input data (place here before running)
@@ -84,7 +84,7 @@ pip install pytest
 Create a `.env` file at project root:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## Usage
