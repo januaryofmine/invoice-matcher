@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .venv/
 .env
+eda/
 
 # Test cache
 .pytest_cache/
@@ -11,6 +12,7 @@ __pycache__/
 # Output files
 output.json
 output.csv
+manual_review.csv
 
 # Data files (may contain sensitive info)
 *.json

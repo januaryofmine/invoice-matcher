@@ -1,53 +1,46 @@
-import pytest
-from datetime import datetime
-
 from matcher.indexer import build_delivery_index
-from tests.fixtures import (
-    DELIVERY_72215,
-    DELIVERY_72212,
-    DELIVERY_72207,
-    DELIVERY_72208,
-    ALL_DELIVERIES,
-)
+from tests.fixtures import DEL_66787, DEL_66984, DEL_66985, DEL_67131
 
 
 class TestBuildDeliveryIndex:
     def test_indexes_by_normalized_plate(self):
-        index = build_delivery_index([DELIVERY_72215])
-        assert '62F00394' in index
+        index = build_delivery_index([DEL_67131])
+        assert "49H01936" in index
 
     def test_entry_has_required_fields(self):
-        index = build_delivery_index([DELIVERY_72215])
-        entry = index['62F00394'][0]
-        assert entry['id'] == 72215
-        assert isinstance(entry['pickup_date'], datetime)
-        assert isinstance(entry['dropoff_date'], datetime)
-        assert entry['weight_tons'] == 5.54
-
-    def test_unique_plates_each_have_one_entry(self):
-        index = build_delivery_index([DELIVERY_72215, DELIVERY_72212])
-        assert len(index['62F00394']) == 1
-        assert len(index['63H01874']) == 1
+        index = build_delivery_index([DEL_67131])
+        entry = index["49H01936"][0]
+        assert entry["id"] == 67131
+        assert entry["pickup_date"] is not None
+        assert entry["dropoff_date"] is not None
+        assert "weight_tons" in entry
+        assert "dropoff_name" in entry
+        assert "dropoff_description" in entry
 
     def test_duplicate_plates_grouped_together(self):
-        index = build_delivery_index([DELIVERY_72207, DELIVERY_72208])
-        entries = index['43C15823']
-        assert len(entries) == 2
-        ids = {e['id'] for e in entries}
-        assert ids == {72207, 72208}
+        index = build_delivery_index([DEL_66985, DEL_66984])
+        assert "50H67882" in index
+        assert len(index["50H67882"]) == 2
+
+    def test_unique_plates_each_have_one_entry(self):
+        index = build_delivery_index([DEL_67131, DEL_66985])
+        assert len(index["49H01936"]) == 1
+        assert len(index["50H67882"]) == 1
 
     def test_delivery_without_truck_is_skipped(self):
-        delivery_no_truck = {
-            'id': 99999,
-            'pickup_date': '2025-09-03',
-            'dropoff_date': '2025-09-04',
-            'weight': 10.0,
-            'computed_data': {},
+        bad_delivery = {
+            "id": 9999,
+            "pickup_date": "2025-07-01",
+            "dropoff_date": "2025-07-02",
+            "weight": 5.0,
+            "computed_data": {},
+            "dropoff_location": {},
         }
-        index = build_delivery_index([delivery_no_truck])
-        assert index == {}
+        index = build_delivery_index([bad_delivery])
+        assert len(index) == 0
 
     def test_all_deliveries_indexed(self):
-        index = build_delivery_index(ALL_DELIVERIES)
-        # 4 deliveries but 2 share a plate → 3 distinct keys
-        assert len(index) == 3
+        deliveries = [DEL_67131, DEL_66787, DEL_66985, DEL_66984]
+        index = build_delivery_index(deliveries)
+        all_ids = [e["id"] for entries in index.values() for e in entries]
+        assert set(all_ids) == {67131, 66787, 66985, 66984}

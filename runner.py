@@ -1,61 +1,98 @@
+"""
+Entry point: load data, run matching, save outputs.
+"""
+
 import csv
 import json
 import sys
 from pathlib import Path
 
-from matcher.matcher import match_invoices
+from matcher.matcher import MatcherConfig, MatchStatus, match_invoices, summarize
 
 
-def run(json_path: str = "20250901.json") -> dict:
-    with open(json_path, encoding="utf-8") as f:
-        data = json.load(f)["data"]
+def run(
+    deliveries_path: str = "large_set.json",
+    invoices_path: str = "large_set_vat.json",
+    config: MatcherConfig | None = None,
+) -> list:
+    # Load
+    with open(deliveries_path, encoding="utf-8") as f:
+        raw = json.load(f)
+        deliveries = (
+            raw["data"]["items"]
+            if "items" in raw.get("data", {})
+            else raw["data"]["deliveries"]
+        )
 
-    result = match_invoices(data["deliveries"], data["vat_invoices"])
+    with open(invoices_path, encoding="utf-8") as f:
+        raw = json.load(f)
+        invoices = raw["data"]["vat_invoices"]
 
-    # Print stats
-    print("=== STATS ===")
-    for k, v in result["stats"].items():
+    print(f"Loaded {len(deliveries)} deliveries, {len(invoices)} invoices")
+
+    # Match
+    results = match_invoices(deliveries, invoices, config)
+
+    # Stats
+    stats = summarize(results)
+    print("\n=== STATS ===")
+    for k, v in stats.items():
         print(f"  {k}: {v}")
 
-    print("\n=== MATCHES (delivery_id -> invoice_ids) ===")
-    for did, inv_ids in sorted(result["matches"].items()):
-        print(f"  delivery {did}: {inv_ids}")
+    out_dir = Path(deliveries_path).parent
 
-    print(f"\n=== UNMATCHED INVOICE IDs (first 10) ===")
-    print(f"  {result['unmatched_invoice_ids'][:10]} ...")
-
-    print(f"\n=== MANUAL REVIEW INVOICE IDs ===")
-    for item in result["manual_review"]:
-        print(f"  invoice {item['id']}: {item['reason']}")
-
-    # Save JSON
-    out_json = Path(json_path).parent / "output.json"
+    # output.json — full results
+    out_json = out_dir / "output.json"
     with open(out_json, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(
+            [
+                {
+                    "invoice_id": r.invoice_id,
+                    "status": r.status.value,
+                    "matched_delivery_id": r.matched_delivery_id,
+                    "confidence_score": r.confidence_score,
+                    "score_gap": r.score_gap,
+                    "reason": r.reason,
+                    "top_candidates": r.top_candidates,
+                }
+                for r in results
+            ],
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
     print(f"\nSaved → {out_json}")
 
-    # Save matches CSV
-    out_csv = Path(json_path).parent / "output.csv"
+    # output.csv — matched invoices
+    out_csv = out_dir / "output.csv"
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["delivery_id", "invoice_id"])
-        for did, inv_ids in sorted(result["matches"].items()):
-            for inv_id in inv_ids:
-                writer.writerow([did, inv_id])
+        writer.writerow(["delivery_id", "invoice_id", "confidence_score", "method"])
+        for r in results:
+            if r.matched_delivery_id:
+                method = "llm" if r.status == MatchStatus.LLM_MATCH else "scoring"
+                writer.writerow(
+                    [r.matched_delivery_id, r.invoice_id, r.confidence_score, method]
+                )
     print(f"Saved → {out_csv}")
 
-    # Save manual review CSV
-    out_manual = Path(json_path).parent / "manual_review.csv"
+    # manual_review.csv
+    out_manual = out_dir / "manual_review.csv"
     with open(out_manual, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["invoice_id", "reason"])
-        for item in result["manual_review"]:
-            writer.writerow([item["id"], item["reason"]])
+        writer.writerow(
+            ["invoice_id", "top_candidate_delivery_id", "score_gap", "reason"]
+        )
+        for r in results:
+            if r.status == MatchStatus.MANUAL_REVIEW:
+                top_del = r.top_candidates[0]["delivery_id"] if r.top_candidates else ""
+                writer.writerow([r.invoice_id, top_del, r.score_gap, r.reason])
     print(f"Saved → {out_manual}")
 
-    return result
+    return results
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "20250901.json"
-    run(path)
+    del_path = sys.argv[1] if len(sys.argv) > 1 else "large_set.json"
+    inv_path = sys.argv[2] if len(sys.argv) > 2 else "large_set_vat.json"
+    run(del_path, inv_path)

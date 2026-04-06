@@ -1,128 +1,120 @@
-# invoice-matcher
+# invoice-matcher-v2
 
-Match VAT invoices to delivery records using a unified pipeline, with LLM-assisted province extraction for ambiguous cases.
+Score-based invoice ↔ delivery matching pipeline with LLM resolution for ambiguous cases.
 
 ## Problem
 
-Given a list of **deliveries** (ERP records) and a large list of **VAT invoices**, find which invoices belong to which delivery. Most invoices won't match any delivery.
+Given a list of **deliveries** and a large list of **VAT invoices**, find which invoices belong to which delivery. Most invoices won't match any delivery in a given dataset.
 
-## Matching Pipeline
+## Pipeline
 
-Every invoice goes through up to 4 steps:
+```
+3,319 invoices
+    │
+    ▼
+Stage 1: Candidate Generation  (plate + date filter)  → 127 relevant
+    │
+    ▼
+Stage 2: Candidate Scoring     (address + weight)
+    │
+    ├─ gap ≥ 0.05 ────────────────────────────────────→ AUTO MATCH
+    ├─ gap < 0.05 → LLM Resolution (~23 cases) ───────→ LLM MATCH
+    │                                                 └─→ MANUAL REVIEW
+    └─ 0 candidates ──────────────────────────────────→ NO MATCH
+```
 
-**Step 1: Plate check**
-- Has plate + matches a delivery → candidates → step 2
-- Has plate + matches nothing → `unmatched`
-- No plate → `manual_review (no_plate)`
+**Score formula:**
+```
+score = 0.7 * address_score + 0.3 * weight_score
+```
+- `address_score` — token overlap between invoice delivery address and dropoff description
+- `weight_score` — ratio of invoice weight (kg→tons) to delivery weight; `None` if missing
 
-**Step 2: Date window `[pickup_date - 1, dropoff_date + 1]`**
-- 1 candidate passes → assign ✓
-- More than 1 candidates pass → step 3a
-- 0 candidates pass → `manual_review (date_out_of_window)`
-
-**Step 3a: LLM province check**
-- Extract province from invoice `(Delivery address)` and each delivery `dropoff_location` via LLM (batched, 1 API call)
-- Filter candidates to same province as invoice
-- Candidates with no province data are kept (not dropped) to avoid false negatives
-- 1 candidate remaining → assign ✓
-- More than 1 candidates remaining → step 3b
-- 0 candidates remaining → `manual_review (province_mismatch)`
-
-**Step 3b: Token overlap address match**
-- Tokenize invoice `(Delivery address)` and delivery `dropoff_location` with Vietnamese stopword filtering
-- Pick candidate(s) with highest token overlap score
-- 1 candidate remaining → assign ✓
-- More than 1 candidates remaining → step 4
-- 0 overlap → fallback to step 4
-
-**Step 4: Weight tiebreak**
-- Compare invoice `net_weight` (kg ÷ 1000) vs delivery `weight` (tons)
-- 1 candidate closest → assign ✓
-- All weights missing → `manual_review (unclear_details)`
-
-**Output buckets:**
-- `matches` — confirmed delivery ↔ invoice assignments
-- `unmatched` — plate exists but no delivery found in system
-- `manual_review` — could not be confidently assigned, needs human review
-
-## Why LLM for province extraction?
-
-Vietnamese addresses have no standard format — `TP. Hồ Chí Minh`, `Thành phố Hồ Chí Minh`, `TP.HCM` all refer to the same province. Rule-based normalization is fragile. LLM extracts provinces reliably in a single batched API call, keeping token cost minimal. LLM is only invoked when Step 2 leaves >1 candidate.
+When weight is missing, address carries full weight (`W_ADDR = 1.0` effectively).
 
 ## Project Structure
 
 ```
-invoice-matcher/
+invoice-matcher-v2/
 ├── matcher/
-│   ├── normalizer.py          # normalize_plate, parse_date, parse_weight_kg
-│   ├── indexer.py             # build delivery index (plate → deliveries)
-│   ├── province_extractor.py  # LLM-based province extraction (batched, 1 API call)
-│   └── matcher.py             # unified matching pipeline
+│   ├── normalizer.py      # plate, date, weight normalization
+│   ├── indexer.py         # build plate → deliveries index
+│   ├── scorer.py          # address + weight scoring
+│   ├── llm_resolver.py    # LLM semantic address matching
+│   └── matcher.py         # unified pipeline
 ├── tests/
-│   ├── fixtures.py            # mock data extracted from 20250901.json
+│   ├── fixtures.py        # mock data for unit tests
 │   ├── test_normalizer.py
 │   ├── test_indexer.py
-│   ├── test_matcher.py        # unit tests with mocked province extractor
-│   └── test_integration.py
-├── runner.py                  # entry point — loads JSON, runs match, saves output
-├── debug_province.py          # debug script for province extraction tracing
-└── 20250901.json              # input data (place here before running)
+│   ├── test_scorer.py
+│   ├── test_matcher.py
+│   └── test_integration.py  # requires data files + API key
+├── runner.py              # entry point
+└── .env                   # ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## Setup
 
 ```bash
 git clone <repo>
-cd invoice-matcher
+cd invoice-matcher-v2
 
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 pip install pytest
 ```
 
-Create a `.env` file at project root:
-
+Create `.env`:
 ```
-export ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## Usage
 
 ```bash
-source .env
-python3 runner.py
-# or specify a custom path:
-python3 runner.py path/to/data.json
+# With default filenames (large_set.json + large_set_vat.json)
+source .env && python3 runner.py
+
+# With custom paths
+source .env && python3 runner.py path/to/deliveries.json path/to/invoices.json
 ```
 
-Output files written to the same directory as the input:
+**Output files** (written to same directory as input):
 
 | File | Contents |
 |---|---|
-| `output.json` | Full result: matches + unmatched IDs + manual_review + stats |
-| `output.csv` | Flat table: `delivery_id, invoice_id` |
-| `manual_review.csv` | Invoices needing human review: `invoice_id, reason` |
+| `output.json` | Full results with score breakdown per invoice |
+| `output.csv` | `delivery_id, invoice_id, confidence_score, method` |
+| `manual_review.csv` | `invoice_id, top_candidate, score_gap, reason` |
 
-## Run Tests
+## Tests
 
 ```bash
-# Unit tests only (no data file or API key needed)
+# Unit tests only (no data files or API key needed)
 python3 -m pytest tests/ -v --ignore=tests/test_integration.py
 
-# All tests including integration (requires data file + API key)
-source .env
-python3 -m pytest tests/ -v
+# All tests (requires data files in working directory + API key)
+source .env && python3 -m pytest tests/ -v
 ```
 
-Unit tests mock the province extractor — no API calls made.
-Integration tests auto-skip if `20250901.json` or `ANTHROPIC_API_KEY` is missing.
+## Configurable Parameters
 
-## Manual Review Reason Codes
+| Parameter | Default | Description |
+|---|---|---|
+| `DATE_WINDOW` | 1 day | Filter window around pickup/dropoff |
+| `W_ADDR` | 0.7 | Address score weight |
+| `W_WEIGHT` | 0.3 | Weight score weight |
+| `CONFIDENCE_THRESHOLD` | 0.05 | Min gap to auto-match |
+| `LLM_MODEL` | claude-haiku-4-5 | Model for semantic address matching |
 
-| Reason | Meaning |
+## Results (large_set.json)
+
+| Metric | Value |
 |---|---|
-| `no_plate` | Invoice has no truck plate |
-| `date_out_of_window` | Invoice date outside delivery window |
-| `province_mismatch` | No delivery dropoff matches invoice province |
-| `unclear_details` | Multiple candidates remain after all tiebreaks |
+| Total invoices | 3,319 |
+| Invoices with no delivery match | ~3,185 |
+| Invoices auto-matched | ~120 |
+| Invoices resolved by LLM | ~7 |
+| Invoices sent to manual review | ~7 |
+| No plate | 75 |

@@ -1,292 +1,266 @@
+"""
+Unified matching pipeline.
+
+Stage 1: Candidate generation (plate + date filter)
+Stage 2: Candidate scoring (address + weight)
+Stage 3: Decision (auto-match | LLM resolve | manual_review)
+"""
+
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import timedelta
+from enum import Enum
 
 from matcher.indexer import DeliveryEntry, build_delivery_index
+from matcher.llm_resolver import resolve as llm_resolve
 from matcher.normalizer import normalize_plate, parse_date, parse_weight_kg
-from matcher.province_extractor import extract_provinces, provinces_match
+from matcher.scorer import (
+    CandidateScore,
+    ScorerConfig,
+    get_score_gap,
+    score_all_candidates,
+)
 
-DATE_WINDOW_DAYS = 1
-
-_STOPWORDS = {
-    "CONG",
-    "TNHH",
-    "THANH",
-    "PHUONG",
-    "PHO",
-    "QUAN",
-    "HUYEN",
-    "TINH",
-    "DUONG",
-    "VIET",
-    "NAM",
-    "KHU",
-    "SO",
-    "LOT",
-    "BLOCK",
-    "PHAN",
-    "TRACH",
-    "NHIEM",
-    "HUU",
-    "HAN",
-    "CO",
-    "CHI",
-    "NHANH",
-    "LIEN",
-    "HIEP",
-    "HOP",
-    "TAC",
-    "XA",
-    "NUOC",
-    "KHAC",
-    "TONG",
-}
-
-# Manual review reason codes
-REASON_NO_PLATE = "no_plate"
-REASON_DATE_OUT_OF_WINDOW = "date_out_of_window"
-REASON_PROVINCE_MISMATCH = "province_mismatch"
-REASON_UNCLEAR_DETAILS = "unclear_details"
+# ── Config ────────────────────────────────────────────────────────────────────
 
 
-# ── Step 2: date window ───────────────────────────────────────────────────────
+@dataclass
+class MatcherConfig:
+    date_window_days: int = 1
+    scorer: ScorerConfig = field(default_factory=ScorerConfig)
+    use_llm: bool = True
 
 
-def _filter_by_date(candidates: list[DeliveryEntry], inv_date) -> list[DeliveryEntry]:
+# ── Result types ──────────────────────────────────────────────────────────────
+
+
+class MatchStatus(str, Enum):
+    AUTO_MATCH = "AUTO_MATCH"
+    LLM_MATCH = "LLM_MATCH"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    NO_MATCH = "NO_MATCH"
+    NO_PLATE = "NO_PLATE"
+
+
+@dataclass
+class InvoiceResult:
+    invoice_id: int
+    status: MatchStatus
+    matched_delivery_id: int | None = None
+    confidence_score: float | None = None
+    score_gap: float | None = None
+    reason: str = ""
+    top_candidates: list[dict] = field(default_factory=list)
+
+
+# ── Stage 1: Candidate generation ─────────────────────────────────────────────
+
+
+def _get_candidates(
+    inv_date,
+    plate: str,
+    index: dict[str, list[DeliveryEntry]],
+    window_days: int,
+) -> list[DeliveryEntry]:
+    """Filter deliveries by plate and date window."""
+    entries = index.get(plate, [])
     if not inv_date:
-        return candidates
+        return entries  # no date → keep all (scored later)
+
     result = []
-    for c in candidates:
-        lo = (
-            c["pickup_date"] - timedelta(days=DATE_WINDOW_DAYS)
-            if c["pickup_date"]
-            else None
-        )
-        hi = (
-            c["dropoff_date"] + timedelta(days=DATE_WINDOW_DAYS)
-            if c["dropoff_date"]
-            else None
-        )
-        if lo and hi and lo <= inv_date <= hi:
-            result.append(c)
-        elif not lo and not hi:
-            result.append(c)
+    for entry in entries:
+        pickup = entry.get("pickup_date")
+        dropoff = entry.get("dropoff_date")
+        if pickup and dropoff:
+            lo = pickup - timedelta(days=window_days)
+            hi = dropoff + timedelta(days=window_days)
+            if lo <= inv_date <= hi:
+                result.append(entry)
+        else:
+            result.append(entry)  # no delivery dates → keep
     return result
 
 
-# ── Step 3a: LLM province filter ─────────────────────────────────────────────
+# ── Stage 3: Decision ─────────────────────────────────────────────────────────
 
 
-def _filter_by_province(
-    candidates: list[DeliveryEntry],
-    inv_province: str,
-    province_map: dict[str, str],
-) -> tuple[list[DeliveryEntry], bool]:
-    """
-    Filter candidates by province match.
-    Returns (filtered, signal_available).
-    signal_available=False means LLM failed → skip this step.
-    """
-    if not inv_province:
-        return candidates, False
-
-    any_dropoff_has_province = any(
-        province_map.get(c.get("dropoff_address_raw", ""), "") for c in candidates
-    )
-    if not any_dropoff_has_province:
-        return candidates, False  # LLM failed → skip
-
-    filtered = [
-        c
-        for c in candidates
-        if not province_map.get(
-            c.get("dropoff_address_raw", ""), ""
-        )  # no province data → keep
-        or provinces_match(
-            inv_province, province_map.get(c.get("dropoff_address_raw", ""), "")
-        )
-    ]
-    return filtered, True
-
-
-# ── Step 3b: token overlap address match ─────────────────────────────────────
-
-
-def _tokenize(text: str) -> set[str]:
-    """Tokenize Vietnamese address, filtering stopwords and short tokens."""
-    import unicodedata
-
-    nfkd = unicodedata.normalize("NFKD", text.upper())
-    ascii_str = "".join(c for c in nfkd if not unicodedata.combining(c))
-    tokens = ascii_str.replace(",", " ").replace(".", " ").split()
-    return {t for t in tokens if len(t) > 2 and t not in _STOPWORDS}
-
-
-def _filter_by_token_overlap(
-    candidates: list[DeliveryEntry],
+def _make_decision(
+    inv_id: int,
     inv_address: str,
-) -> list[DeliveryEntry]:
-    """
-    Filter candidates by token overlap between invoice delivery address
-    and delivery dropoff address.
-    Returns filtered list if any candidate has overlap > 0, else original list.
-    """
-    if not inv_address:
-        return candidates
+    scores: list[CandidateScore],
+    config: MatcherConfig,
+) -> InvoiceResult:
+    """Apply decision policy based on scores and gap."""
 
-    inv_tokens = _tokenize(inv_address)
-    if not inv_tokens:
-        return candidates
+    def _format_candidates(scores: list[CandidateScore]) -> list[dict]:
+        return [
+            {
+                "delivery_id": s.delivery_id,
+                "score": s.total_score,
+                "reasons": {
+                    "address_score": s.address_score,
+                    "weight_score": s.weight_score,
+                },
+            }
+            for s in scores[:3]
+        ]
 
-    def score(c: DeliveryEntry) -> int:
-        dropoff = c.get("dropoff_address", "") or c.get("dropoff_address_raw", "")
-        return len(inv_tokens & _tokenize(dropoff))
+    if not scores:
+        return InvoiceResult(
+            invoice_id=inv_id,
+            status=MatchStatus.NO_MATCH,
+            reason="no candidates after date filter",
+        )
 
-    scored = [(score(c), c) for c in candidates]
-    best = max(s for s, _ in scored)
+    gap = get_score_gap(scores)
+    top = scores[0]
 
-    if best == 0:
-        return candidates  # no signal → fallback to weight
+    # Single candidate → auto-match (plate + date already sufficient evidence)
+    if len(scores) == 1:
+        return InvoiceResult(
+            invoice_id=inv_id,
+            status=MatchStatus.AUTO_MATCH,
+            matched_delivery_id=top.delivery_id,
+            confidence_score=top.total_score,
+            score_gap=gap,
+            reason="single candidate after filtering",
+            top_candidates=_format_candidates(scores),
+        )
 
-    return [c for s, c in scored if s == best]
+    # Clear winner → auto-match
+    if gap >= config.scorer.confidence_threshold:
+        return InvoiceResult(
+            invoice_id=inv_id,
+            status=MatchStatus.AUTO_MATCH,
+            matched_delivery_id=top.delivery_id,
+            confidence_score=top.total_score,
+            score_gap=gap,
+            reason=f"score gap {gap:.3f} >= threshold {config.scorer.confidence_threshold}",
+            top_candidates=_format_candidates(scores),
+        )
 
+    # Ambiguous → LLM
+    if config.use_llm:
+        llm_result = llm_resolve(inv_address, scores[:3])  # pass top 3 to LLM
+        confidence = llm_result.get("confidence", "failed")
+        del_id = llm_result.get("matched_delivery_id")
+        reason = llm_result.get("reason", "")
 
-# ── Step 4: weight tiebreak ───────────────────────────────────────────────────
+        if del_id and confidence in ("high", "medium"):
+            return InvoiceResult(
+                invoice_id=inv_id,
+                status=MatchStatus.LLM_MATCH,
+                matched_delivery_id=del_id,
+                confidence_score=top.total_score,
+                score_gap=gap,
+                reason=f"LLM ({confidence}): {reason}",
+                top_candidates=_format_candidates(scores),
+            )
 
-
-def _tiebreak_by_weight(
-    candidates: list[DeliveryEntry], inv_weight_tons: float
-) -> list[DeliveryEntry]:
-    def diff(d):
-        w = d.get("weight_tons")
-        return abs(w - inv_weight_tons) if w is not None else float("inf")
-
-    scores = [(diff(d), d) for d in candidates]
-    best_score = min(s for s, _ in scores)
-
-    if best_score == float("inf"):
-        return candidates  # no weight signal → cannot decide
-
-    return [d for s, d in scores if s == best_score]
+    # Fallback → manual review
+    return InvoiceResult(
+        invoice_id=inv_id,
+        status=MatchStatus.MANUAL_REVIEW,
+        confidence_score=top.total_score,
+        score_gap=gap,
+        reason=f"score gap {gap:.3f} < threshold, LLM inconclusive",
+        top_candidates=_format_candidates(scores),
+    )
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 
-def match_invoices(deliveries: list[dict], invoices: list[dict]) -> dict:
+def match_invoices(
+    deliveries: list[dict],
+    invoices: list[dict],
+    config: MatcherConfig | None = None,
+) -> list[InvoiceResult]:
     """
-    Step 1: Plate check
-      - Has plate + found   → candidates → step 2
-      - Has plate + missing → unmatched
-      - No plate            → manual_review (no_plate)
+    Match VAT invoices to deliveries.
 
-    Step 2: Date window [pickup-1, dropoff+1]
-      - 1 candidate         → assign
-      - >1 candidates       → step 3a
-      - 0 candidates        → manual_review (date_out_of_window)
+    Stage 1: Plate + date filter → candidates
+    Stage 2: Score candidates (address + weight)
+    Stage 3: Decide (auto | LLM | manual_review)
 
-    Step 3a: LLM province check (skipped gracefully if API unavailable)
-      - 1 candidate         → assign
-      - >1 candidates       → step 3b
-      - 0 candidates        → manual_review (province_mismatch)
-
-    Step 3b: Token overlap address match
-      - 1 candidate         → assign
-      - >1 candidates       → step 4
-      - 0 candidates        → step 4 (fallback: keep all)
-
-    Step 4: Weight tiebreak
-      - 1 candidate         → assign
-      - >1 candidates       → manual_review (unclear_details)
+    Returns list of InvoiceResult, one per invoice.
     """
+    if config is None:
+        config = MatcherConfig()
+
     index = build_delivery_index(deliveries)
+    results = []
 
-    matched: dict[int, list[int]] = defaultdict(list)
-    unmatched: list[int] = []
-    manual_review: list[dict] = []
-
-    # Step 1: split by plate
-    with_plate = []
     for inv in invoices:
-        norm_plate = normalize_plate(inv.get("truck_plate"))
-        if not norm_plate:
-            manual_review.append({"id": inv["id"], "reason": REASON_NO_PLATE})
-            continue
-        if norm_plate not in index:
-            unmatched.append(inv["id"])
-            continue
-        with_plate.append({"invoice": inv, "candidates": list(index[norm_plate])})
+        inv_id = inv["id"]
+        plate = normalize_plate(inv.get("truck_plate"))
 
-    # Batch province extraction — 1 LLM call
-    inv_addresses = [
-        (p["invoice"].get("metadata") or {}).get("(Delivery address)", "")
-        for p in with_plate
-    ]
-    dropoff_addresses = list(
-        {c.get("dropoff_address_raw", "") for p in with_plate for c in p["candidates"]}
-    )
-    province_map = extract_provinces(list(set(inv_addresses + dropoff_addresses)))
+        # No plate → manual review immediately
+        if not plate:
+            results.append(
+                InvoiceResult(
+                    invoice_id=inv_id,
+                    status=MatchStatus.NO_PLATE,
+                    reason="missing truck plate",
+                )
+            )
+            continue
 
-    # Step 2 → 3a → 3b → 4
-    for p in with_plate:
-        inv = p["invoice"]
-        candidates = p["candidates"]
+        # Plate not in any delivery → no match
+        if plate not in index:
+            results.append(
+                InvoiceResult(
+                    invoice_id=inv_id,
+                    status=MatchStatus.NO_MATCH,
+                    reason="plate not found in any delivery",
+                )
+            )
+            continue
 
         meta = inv.get("metadata") or {}
         inv_date = parse_date(meta.get("(Date)"))
-        inv_address = meta.get("(Delivery address)", "")
-        inv_province = province_map.get(inv_address, "")
-        inv_weight_tons = parse_weight_kg(inv.get("sku_data")) / 1000
+        inv_address = meta.get("(Delivery address)", "") or ""
+        inv_weight_kg = parse_weight_kg(inv.get("sku_data"))
 
-        # Step 2
-        candidates = _filter_by_date(candidates, inv_date)
-        if len(candidates) == 0:
-            manual_review.append({"id": inv["id"], "reason": REASON_DATE_OUT_OF_WINDOW})
-            continue
-        if len(candidates) == 1:
-            matched[candidates[0]["id"]].append(inv["id"])
-            continue
+        # Stage 1: candidates
+        candidates = _get_candidates(inv_date, plate, index, config.date_window_days)
 
-        # Step 3a: province (skip if LLM unavailable)
-        candidates, province_signal = _filter_by_province(
-            candidates, inv_province, province_map
-        )
-        if province_signal:
-            if len(candidates) == 0:
-                manual_review.append(
-                    {"id": inv["id"], "reason": REASON_PROVINCE_MISMATCH}
+        if not candidates:
+            results.append(
+                InvoiceResult(
+                    invoice_id=inv_id,
+                    status=MatchStatus.NO_MATCH,
+                    reason="plate matches but invoice date outside delivery window",
                 )
-                continue
-            if len(candidates) == 1:
-                matched[candidates[0]["id"]].append(inv["id"])
-                continue
-
-        # Step 3b: token overlap
-        candidates = _filter_by_token_overlap(candidates, inv_address)
-        if len(candidates) == 1:
-            matched[candidates[0]["id"]].append(inv["id"])
+            )
             continue
 
-        # Step 4: weight tiebreak
-        candidates = _tiebreak_by_weight(candidates, inv_weight_tons)
-        if len(candidates) == 1:
-            matched[candidates[0]["id"]].append(inv["id"])
-        else:
-            manual_review.append({"id": inv["id"], "reason": REASON_UNCLEAR_DETAILS})
+        # Stage 2: score
+        scores = score_all_candidates(
+            inv_address, inv_weight_kg, candidates, config.scorer
+        )
+
+        # Stage 3: decide
+        result = _make_decision(inv_id, inv_address, scores, config)
+        results.append(result)
+
+    return results
+
+
+def summarize(results: list[InvoiceResult]) -> dict:
+    """Compute summary statistics from match results."""
+    counts: dict[str, int] = defaultdict(int)
+    for r in results:
+        counts[r.status.value] += 1
+
+    matched = counts[MatchStatus.AUTO_MATCH] + counts[MatchStatus.LLM_MATCH]
 
     return {
-        "matches": dict(matched),
-        "unmatched_invoice_ids": unmatched,
-        "manual_review": manual_review,
-        "stats": {
-            "total_invoices": len(invoices),
-            "invoices_with_plate": len(with_plate) + len(unmatched),
-            "invoices_without_plate": sum(
-                1 for inv in invoices if not normalize_plate(inv.get("truck_plate"))
-            ),
-            "matched_invoices": sum(len(v) for v in matched.values()),
-            "unmatched_invoices": len(unmatched),
-            "manual_review_invoices": len(manual_review),
-            "deliveries_with_match": len(matched),
-            "deliveries_without_match": len(deliveries) - len(matched),
-        },
+        "total": len(results),
+        "auto_match": counts[MatchStatus.AUTO_MATCH],
+        "llm_match": counts[MatchStatus.LLM_MATCH],
+        "manual_review": counts[MatchStatus.MANUAL_REVIEW],
+        "no_match": counts[MatchStatus.NO_MATCH],
+        "no_plate": counts[MatchStatus.NO_PLATE],
+        "total_matched": matched,
     }
