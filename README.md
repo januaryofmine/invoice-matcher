@@ -15,8 +15,6 @@ Four steps, in order:
 3. **Location tiebreak** — when two deliveries share the same plate, match invoice `(Delivery address)` against delivery `dropoff_location` using keyword overlap. This is the primary tiebreak signal.
 4. **Weight tiebreak** — fallback when location gives no signal. Assign to whichever delivery's weight (tons) is closest to the invoice's net weight (kg ÷ 1000).
 
-No LLM is used. All signal is structured data.
-
 ## Project Structure
 
 ```
