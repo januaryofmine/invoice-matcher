@@ -8,11 +8,12 @@ Given a list of **deliveries** (ERP records) and a large list of **VAT invoices*
 
 ## Matching Logic
 
-Three steps, in order:
+Four steps, in order:
 
 1. **Plate lookup** — normalize truck plate (strip `-`, `.`, spaces, uppercase) and index deliveries by plate. ~97% of invoices are dropped here.
 2. **Date filter** — invoice date must fall within `[pickup_date - 1, dropoff_date + 1]`.
-3. **Weight tiebreak** — when two deliveries share the same plate, assign the invoice to whichever delivery's weight (tons) is closest to the invoice's net weight (kg ÷ 1000).
+3. **Location tiebreak** — when two deliveries share the same plate, match invoice `(Delivery address)` against delivery `dropoff_location` using keyword overlap. This is the primary tiebreak signal.
+4. **Weight tiebreak** — fallback when location gives no signal. Assign to whichever delivery's weight (tons) is closest to the invoice's net weight (kg ÷ 1000).
 
 No LLM is used. All signal is structured data.
 
@@ -41,7 +42,7 @@ git clone <repo>
 cd invoice-matcher
 
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 pip install pytest
 ```
@@ -53,7 +54,7 @@ No other dependencies — only Python stdlib.
 Place `20250901.json` at the project root, then:
 
 ```bash
-python3 runner
+python3 runner.py
 # or specify a custom path:
 python3 runner.py path/to/data.json
 ```
@@ -82,17 +83,17 @@ Integration tests auto-skip if `20250901.json` is not present.
 | Metric | Value |
 |---|---|
 | Total invoices | 680 |
-| Matched | 20 |
-| Unmatched | 660 |
-| Deliveries with match | 9 / 10 |
+| Invoices assigned to a delivery | 20 |
+| Invoices with no match | 660 |
+| Deliveries covered | 10 / 10 |
 
 ## Test Coverage
 
-49 tests across 4 files:
+54 tests across 4 files:
 
 | File | What it tests |
 |---|---|
 | `test_normalizer.py` | Plate normalization, date parsing, weight edge cases (None, NaN) |
 | `test_indexer.py` | Index building, duplicate plate grouping, missing truck handling |
-| `test_matcher.py` | Plate miss, date window, multi-invoice assignment, weight tiebreak |
-| `test_integration.py` | Full file run, known match assertions, no double-assignment |
+| `test_matcher.py` | Plate miss, date window, multi-invoice assignment, location tiebreak, weight tiebreak |
+| `test_integration.py` | Full file run, known match assertions, location tiebreak on 72207/72208, no double-assignment |

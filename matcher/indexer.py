@@ -3,7 +3,6 @@ from datetime import datetime
 
 from matcher.normalizer import normalize_plate, parse_date
 
-
 DeliveryEntry = dict  # typed alias for readability
 
 
@@ -18,16 +17,21 @@ def build_delivery_index(deliveries: list[dict]) -> dict[str, list[DeliveryEntry
     index: dict[str, list[DeliveryEntry]] = defaultdict(list)
 
     for d in deliveries:
-        truck = (d.get('computed_data') or {}).get('truck') or {}
-        plate = normalize_plate(truck.get('plate'))
+        truck = (d.get("computed_data") or {}).get("truck") or {}
+        plate = normalize_plate(truck.get("plate"))
         if not plate:
             continue
 
-        index[plate].append({
-            'id': d['id'],
-            'pickup_date': parse_date(d.get('pickup_date')),
-            'dropoff_date': parse_date(d.get('dropoff_date')),
-            'weight_tons': d.get('weight'),
-        })
+        dropoff_loc = d.get("dropoff_location") or {}
+        index[plate].append(
+            {
+                "id": d["id"],
+                "pickup_date": parse_date(d.get("pickup_date")),
+                "dropoff_date": parse_date(d.get("dropoff_date")),
+                "weight_tons": d.get("weight"),
+                "dropoff_name": (dropoff_loc.get("name") or "").upper(),
+                "dropoff_address": (dropoff_loc.get("description") or "").upper(),
+            }
+        )
 
     return dict(index)
