@@ -12,7 +12,8 @@ def build_delivery_index(deliveries: list[dict]) -> dict[str, list[DeliveryEntry
     Multiple deliveries can share the same plate (handled downstream).
 
     Each entry contains:
-        id, pickup_date, dropoff_date, weight_tons
+        id, pickup_date, dropoff_date, weight_tons,
+        dropoff_name, dropoff_address, broker_name
     """
     index: dict[str, list[DeliveryEntry]] = defaultdict(list)
 
@@ -23,6 +24,8 @@ def build_delivery_index(deliveries: list[dict]) -> dict[str, list[DeliveryEntry
             continue
 
         dropoff_loc = d.get("dropoff_location") or {}
+        broker = d.get("broker_company") or {}
+        dropoff_desc = dropoff_loc.get("description") or ""
         index[plate].append(
             {
                 "id": d["id"],
@@ -30,8 +33,35 @@ def build_delivery_index(deliveries: list[dict]) -> dict[str, list[DeliveryEntry
                 "dropoff_date": parse_date(d.get("dropoff_date")),
                 "weight_tons": d.get("weight"),
                 "dropoff_name": (dropoff_loc.get("name") or "").upper(),
-                "dropoff_address": (dropoff_loc.get("description") or "").upper(),
+                "dropoff_address": dropoff_desc.upper(),
+                "dropoff_address_raw": dropoff_desc,
+                "broker_name": (broker.get("name") or "").upper(),
             }
         )
 
     return dict(index)
+
+
+def build_all_delivery_entries(deliveries: list[dict]) -> list[DeliveryEntry]:
+    """
+    Return all deliveries as a flat list of entries — used by pipeline B
+    (no-plate invoices) which must search across all deliveries.
+    """
+    entries = []
+    for d in deliveries:
+        dropoff_loc = d.get("dropoff_location") or {}
+        broker = d.get("broker_company") or {}
+        dropoff_desc = dropoff_loc.get("description") or ""
+        entries.append(
+            {
+                "id": d["id"],
+                "pickup_date": parse_date(d.get("pickup_date")),
+                "dropoff_date": parse_date(d.get("dropoff_date")),
+                "weight_tons": d.get("weight"),
+                "dropoff_name": (dropoff_loc.get("name") or "").upper(),
+                "dropoff_address": dropoff_desc.upper(),
+                "dropoff_address_raw": dropoff_desc,
+                "broker_name": (broker.get("name") or "").upper(),
+            }
+        )
+    return entries

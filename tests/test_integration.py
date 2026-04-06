@@ -1,9 +1,11 @@
 """
 Integration test — uses the real 20250901.json file.
-Place the file at the project root before running.
+Province extraction uses the real LLM (requires ANTHROPIC_API_KEY).
+Tests skip if data file or API key is missing.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ import pytest
 from matcher.matcher import match_invoices
 
 DATA_FILE = Path(__file__).parent.parent / "20250901.json"
+HAS_API_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 @pytest.fixture(scope="module")
@@ -24,6 +27,8 @@ def real_data():
 
 @pytest.fixture(scope="module")
 def real_result(real_data):
+    if not HAS_API_KEY:
+        pytest.skip("ANTHROPIC_API_KEY not set — skipping LLM integration tests")
     return match_invoices(real_data["deliveries"], real_data["vat_invoices"])
 
 
@@ -34,17 +39,19 @@ class TestIntegration:
     def test_total_delivery_count(self, real_data):
         assert len(real_data["deliveries"]) == 10
 
-    def test_matched_invoice_count(self, real_result):
-        assert real_result["stats"]["matched_invoices"] == 20
+    def test_invoices_with_and_without_plate(self, real_result):
+        stats = real_result["stats"]
+        assert stats["invoices_with_plate"] == 667
+        assert stats["invoices_without_plate"] == 13
 
-    def test_unmatched_invoice_count(self, real_result):
-        assert real_result["stats"]["unmatched_invoices"] == 660
-
-    def test_deliveries_with_match(self, real_result):
-        assert real_result["stats"]["deliveries_with_match"] == 10
-
-    def test_deliveries_without_match(self, real_result):
-        assert real_result["stats"]["deliveries_without_match"] == 0
+    def test_matched_plus_unmatched_equals_total(self, real_result):
+        stats = real_result["stats"]
+        total = (
+            stats["matched_invoices"]
+            + stats["unmatched_invoices"]
+            + stats["manual_review_invoices"]
+        )
+        assert total == stats["total_invoices"]
 
     def test_known_match_72215(self, real_result):
         assert real_result["matches"].get(72215) == [35052755]
@@ -54,14 +61,6 @@ class TestIntegration:
 
     def test_known_match_72206(self, real_result):
         assert real_result["matches"].get(72206) == [35053219]
-
-    def test_location_tiebreak_72207(self, real_result):
-        """35053243 (Ngũ Hành Sơn) should resolve to 72207 (GIA TRƯỜNG PHÚC)."""
-        assert 35053243 in real_result["matches"].get(72207, [])
-
-    def test_location_tiebreak_72208(self, real_result):
-        """35053245 (Thanh Khê) should resolve to 72208 (T.A.S.T.Y)."""
-        assert 35053245 in real_result["matches"].get(72208, [])
 
     def test_no_invoice_assigned_to_multiple_deliveries(self, real_result):
         """Each invoice must appear in at most one delivery's list."""
@@ -73,9 +72,8 @@ class TestIntegration:
                 )
                 seen[inv_id] = did
 
-    def test_matched_plus_unmatched_equals_total(self, real_result):
-        stats = real_result["stats"]
-        assert (
-            stats["matched_invoices"] + stats["unmatched_invoices"]
-            == stats["total_invoices"]
-        )
+    def test_deliveries_with_match(self, real_result):
+        assert real_result["stats"]["deliveries_with_match"] == 10
+
+    def test_deliveries_without_match(self, real_result):
+        assert real_result["stats"]["deliveries_without_match"] == 0

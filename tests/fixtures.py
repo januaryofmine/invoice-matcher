@@ -10,7 +10,14 @@ Scenarios covered:
 
 
 def _make_delivery(
-    id_, plate, pickup, dropoff, weight, dropoff_name="", dropoff_desc=""
+    id_,
+    plate,
+    pickup,
+    dropoff,
+    weight,
+    dropoff_name="",
+    dropoff_desc="",
+    broker_name="",
 ):
     """Minimal delivery dict with only fields the matcher touches."""
     return {
@@ -22,6 +29,9 @@ def _make_delivery(
         "dropoff_location": {
             "name": dropoff_name,
             "description": dropoff_desc,
+        },
+        "broker_company": {
+            "name": broker_name,
         },
     }
 
@@ -103,8 +113,49 @@ ALL_INVOICES = [
     INVOICE_35053245,
 ]
 
-UNRELATED_INVOICE = _make_invoice(99999999, "99Z-999.99", "03/09/2025", 1000.0)
+
+def _make_no_plate_invoice(id_, date, weight_kg, delivery_address="", customer_name=""):
+    return {
+        "id": id_,
+        "truck_plate": None,
+        "metadata": {
+            "(Date)": date,
+            "(Delivery address)": delivery_address,
+            "(Customer's name)": customer_name,
+        },
+        "sku_data": {"net_weight": weight_kg},
+    }
+
+
+# ── No-plate invoice fixtures (from real data) ────────────────────────────────
+
+# This invoice has a delivery address that overlaps with NGỌC LANG dropoff (72215 area)
+# Used to test pipeline B location matching
+NO_PLATE_INVOICE_WITH_LOCATION = _make_no_plate_invoice(
+    id_=88000001,
+    date="03/09/2025",
+    weight_kg=5000.0,
+    delivery_address="HIỆP PHƯỚC, NHÀ BÈ, THÀNH PHỐ HỒ CHÍ MINH",
+    customer_name="",
+)
+
+NO_PLATE_INVOICE_WITH_CUSTOMER = _make_no_plate_invoice(
+    id_=88000002,
+    date="03/09/2025",
+    weight_kg=5000.0,
+    delivery_address="",
+    customer_name="CN Cty TNHH Dầu Thực Vật Cái Lân",
+)
+
+NO_PLATE_INVOICE_NO_SIGNAL = _make_no_plate_invoice(
+    id_=88000003,
+    date="03/09/2025",
+    weight_kg=None,
+    delivery_address="",
+    customer_name="",
+)
 NO_PLATE_INVOICE = _make_invoice(88888888, None, "03/09/2025", 500.0)
 OUT_OF_DATE_INVOICE = _make_invoice(
     77777777, "62F-003.94", "10/09/2025", 4480.0
 )  # way outside window
+UNRELATED_INVOICE = _make_invoice(99999999, "99Z-999.99", "03/09/2025", 1000.0)
