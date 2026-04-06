@@ -535,7 +535,8 @@ export default function App() {
   const [fileName, setFileName] = useState("Loading...");
 
   useEffect(() => {
-    fetch("/output.json")
+    const url = import.meta.env.PROD ? "/api/output" : "/output.json";
+    fetch(url)
       .then((r) => r.json())
       .then((parsed) => {
         setData(Array.isArray(parsed) ? parsed : []);
