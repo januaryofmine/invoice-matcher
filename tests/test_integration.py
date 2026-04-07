@@ -8,8 +8,8 @@ import os
 
 import pytest
 
-from matcher.matcher import MatcherConfig, MatchStatus, match_invoices
-from matcher.scorer import ScorerConfig
+from pipeline.matcher import MatcherConfig, MatchStatus, match_invoices
+from pipeline.scorer import ScorerConfig
 
 
 def load_data():

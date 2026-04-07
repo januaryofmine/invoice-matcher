@@ -1,7 +1,7 @@
 import pytest
 
-from matcher.indexer import DeliveryEntry
-from matcher.scorer import (
+from pipeline.indexer import DeliveryEntry
+from pipeline.scorer import (
     CandidateScore,
     ScorerConfig,
     address_score,

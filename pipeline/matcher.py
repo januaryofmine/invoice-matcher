@@ -20,11 +20,11 @@ import logging
 from collections import defaultdict
 from datetime import timedelta
 
-from matcher.indexer import DeliveryEntry, build_delivery_index
-from matcher.llm_resolver import LLMResolver, resolve as llm_resolve
-from matcher.normalizer import normalize_plate, parse_date, parse_weight_kg
-from matcher.scorer import CandidateScore, get_score_gap, score_all_candidates
-from matcher.types import InvoiceResult, MatcherConfig, MatchStatus
+from pipeline.indexer import DeliveryEntry, build_delivery_index
+from adapters.llm import LLMResolver, resolve as llm_resolve
+from pipeline.normalizer import normalize_plate, parse_date, parse_weight_kg
+from pipeline.scorer import CandidateScore, get_score_gap, score_all_candidates
+from core.types import InvoiceResult, MatcherConfig, MatchStatus
 
 logger = logging.getLogger(__name__)
 

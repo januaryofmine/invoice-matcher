@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from matcher.normalizer import normalize_plate, parse_date, parse_weight_kg, tokenize
+from pipeline.normalizer import normalize_plate, parse_date, parse_weight_kg, tokenize
 
 
 class TestNormalizePlate:

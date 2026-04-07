@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 from typing import Protocol
 
-from matcher.scorer import CandidateScore
+from pipeline.scorer import CandidateScore
 
 logger = logging.getLogger(__name__)
 

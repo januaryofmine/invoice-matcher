@@ -18,8 +18,8 @@ weight data remain comparable.
 
 from dataclasses import dataclass
 
-from matcher.normalizer import tokenize
-from matcher.types import DeliveryEntry, ScorerConfig
+from pipeline.normalizer import tokenize
+from core.types import DeliveryEntry, ScorerConfig
 
 
 # ── Score result type ─────────────────────────────────────────────────────────

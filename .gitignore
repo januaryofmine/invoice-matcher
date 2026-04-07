@@ -4,30 +4,23 @@ __pycache__/
 *.pyo
 .venv/
 .env
-eda/
 
 # Test cache
 .pytest_cache/
 
-# Output files
+# Output files (generated on each run)
 output.json
 output.csv
 manual_review.csv
 
-# Data files (may contain sensitive info)
-*.json
-!invoice-ui/package.json
-!invoice-ui/package-lock.json
-!invoice-ui/vite.config.js
+# Large data files (root-level JSON data files)
+/*.json
+eda/
 
 # OS
 .DS_Store
 
 # invoice-ui
 invoice-ui/node_modules/
-invoice-ui/public/output.json
 invoice-ui/dist/
-!invoice-ui/package.json
-!invoice-ui/package-lock.json
-!invoice-ui/vite.config.js
-!invoice-ui/vercel.json
+invoice-ui/public/output.json

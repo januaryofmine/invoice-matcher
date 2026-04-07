@@ -271,18 +271,30 @@ Since only 127 invoices survive primary filtering, manual review volume is manag
 ## Implementation Plan
 
 ```
-matcher/
-├── normalizer.py        # plate, date, weight normalization (existing)
-├── indexer.py           # build plate → deliveries index (existing)
-├── scorer.py            # NEW: address + weight scoring
-├── llm_resolver.py      # NEW: LLM-based address matching
-├── matcher.py           # REWRITE: unified pipeline with scoring
-└── runner.py            # entry point (existing, minor updates)
+core/
+└── types.py             # All shared types — Single Source of Truth
+
+pipeline/
+├── normalizer.py        # plate, date, weight normalization
+├── indexer.py           # build plate → deliveries index
+├── scorer.py            # address + weight scoring
+└── matcher.py           # orchestrate the 3-stage pipeline
+
+adapters/
+└── llm.py               # LLM fallback (Claude Haiku) — DIP via LLMResolver Protocol
+
+file_io/
+├── loader.py            # read delivery + invoice JSON
+└── writer.py            # write output.json, output.csv, manual_review.csv
+
+runner.py                # CLI entry point — I/O wiring only
 
 tests/
-├── test_scorer.py       # NEW
-├── test_llm_resolver.py # NEW
-└── test_matcher.py      # UPDATE
+├── test_normalizer.py
+├── test_indexer.py
+├── test_scorer.py
+├── test_matcher.py
+└── test_integration.py
 ```
 
 **V1 — Production-safe baseline:**

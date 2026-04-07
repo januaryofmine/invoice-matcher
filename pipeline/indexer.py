@@ -11,8 +11,8 @@ instead of O(n_deliveries).
 
 from collections import defaultdict
 
-from matcher.normalizer import normalize_plate, parse_date, parse_weight_tons
-from matcher.types import DeliveryEntry
+from pipeline.normalizer import normalize_plate, parse_date, parse_weight_tons
+from core.types import DeliveryEntry
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

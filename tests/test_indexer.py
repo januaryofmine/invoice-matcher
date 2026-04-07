@@ -1,4 +1,4 @@
-from matcher.indexer import build_delivery_index
+from pipeline.indexer import build_delivery_index
 from tests.fixtures import DEL_66787, DEL_66984, DEL_66985, DEL_67131
 
 

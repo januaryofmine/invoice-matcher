@@ -18,7 +18,7 @@ def upload():
         sys.exit(1)
 
     if not os.path.exists(OUTPUT_FILE):
-        print(f"ERROR: {OUTPUT_FILE} not found — run match_invoices.py first")
+        print(f"ERROR: {OUTPUT_FILE} not found — run runner.py first")
         sys.exit(1)
 
     print(f"Uploading {OUTPUT_FILE} to Vercel Blob...")
