@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -173,11 +173,12 @@ class TestLLMFallback:
             "confidence": "high",
             "reason": "address matches Big C",
         }
-        with patch("matcher.matcher.llm_resolve", return_value=mock_result) as mock_llm:
-            results = match_invoices([DEL_66985, DEL_66984], [INV_66985_A], config)
-            assert mock_llm.called
-            assert results[0].status == MatchStatus.LLM_MATCH
-            assert results[0].matched_delivery_id == 66985
+        # Use dependency injection instead of patching module-level name
+        mock_llm = MagicMock(return_value=mock_result)
+        results = match_invoices([DEL_66985, DEL_66984], [INV_66985_A], config, llm_resolver=mock_llm)
+        assert mock_llm.called
+        assert results[0].status == MatchStatus.LLM_MATCH
+        assert results[0].matched_delivery_id == 66985
 
     def test_llm_low_confidence_goes_to_manual_review(self):
         config = MatcherConfig(
@@ -189,6 +190,6 @@ class TestLLMFallback:
             "confidence": "low",
             "reason": "cannot determine",
         }
-        with patch("matcher.matcher.llm_resolve", return_value=mock_result):
-            results = match_invoices([DEL_66985, DEL_66984], [INV_66985_A], config)
-            assert results[0].status == MatchStatus.MANUAL_REVIEW
+        mock_llm = MagicMock(return_value=mock_result)
+        results = match_invoices([DEL_66985, DEL_66984], [INV_66985_A], config, llm_resolver=mock_llm)
+        assert results[0].status == MatchStatus.MANUAL_REVIEW
